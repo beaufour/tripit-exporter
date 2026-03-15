@@ -169,8 +169,13 @@ def api_get(page, path, params=None):
     return resp
 
 
-def list_trips(page, past=False):
-    """Fetch all trips (handles pagination)."""
+def list_trips(page, past=False, traveler=True):
+    """Fetch all trips (handles pagination).
+
+    Args:
+        past: If True, fetch past trips instead of upcoming.
+        traveler: If True, fetch your trips. If False, fetch others' trips.
+    """
     all_trips = []
     page_num = 1
 
@@ -180,7 +185,7 @@ def list_trips(page, past=False):
             "page_size": "50",
             "past": str(past).lower(),
             "should_sort_trips_by_date": "true",
-            "traveler": "true",
+            "traveler": str(traveler).lower(),
             "trip_permission_filter": "all",
             "page_num": str(page_num),
         }
@@ -396,6 +401,10 @@ def main():
         "--past", action="store_true",
         help="Include past trips",
     )
+    parser.add_argument(
+        "--others", action="store_true",
+        help="Include trips where you are not the traveler",
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -417,6 +426,10 @@ def main():
         trip_summaries = list_trips(page, past=False)
         if args.past:
             trip_summaries += list_trips(page, past=True)
+        if args.others:
+            trip_summaries += list_trips(page, past=False, traveler=False)
+            if args.past:
+                trip_summaries += list_trips(page, past=True, traveler=False)
         print(f"  Found {len(trip_summaries)} trips.")
 
         if args.limit:
