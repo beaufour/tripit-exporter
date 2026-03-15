@@ -8,7 +8,7 @@ Captures flights (with seats, aircraft, travelers), hotels, transport, car renta
 
 ```bash
 uv sync
-playwright install chromium
+uv run playwright install
 ```
 
 ## Configuration
