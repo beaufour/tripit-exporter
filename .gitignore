@@ -4,4 +4,5 @@ trips.json
 trips.csv
 tripit_errors.json
 geocache.json
+trips.db
 trips_map.html

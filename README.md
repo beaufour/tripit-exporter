@@ -1,6 +1,6 @@
 # tripit-exporter
 
-Export all your TripIt trips to JSON using TripIt's internal API.
+Export all your TripIt trips to a SQLite database using TripIt's internal API.
 
 Captures flights (with seats, aircraft, travelers), hotels, transport, car rentals, and activities.
 
@@ -33,18 +33,22 @@ uv run python exporter.py --past
 uv run python exporter.py --limit 5
 ```
 
-Output is written to `trips.json`.
+Output is written to `trips.db` (SQLite).
 
 ## Map Visualization
 
-Generate an interactive map of all your trips:
+Geocode trip locations and generate an interactive map:
 
 ```bash
+# Geocode locations (only processes new/ungeocoded locations)
+uv run python geocoder.py
+
+# Generate the map
 uv run python build_map.py
 open trips_map.html
 ```
 
-This geocodes each trip's location (cached in `geocache.json` for fast re-runs) and produces a self-contained HTML file with:
+This produces a self-contained HTML file with:
 
 - Dark-themed Leaflet map with colored dots per destination
 - Year filter buttons to toggle trips by year

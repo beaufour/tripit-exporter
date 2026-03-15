@@ -29,10 +29,11 @@ from datetime import datetime, timezone
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
+from db import get_connection, init_db, upsert_trip
+
 
 CONFIG_FILE = Path("config.toml")
 SESSION_FILE = Path("tripit_session.json")
-OUTPUT_JSON = Path("trips.json")
 
 TRIPIT_BASE = "https://www.tripit.com"
 API_BASE = f"{TRIPIT_BASE}/api/v2"
@@ -369,15 +370,6 @@ def _format_address(addr):
 
 
 # ---------------------------------------------------------------------------
-# Output
-# ---------------------------------------------------------------------------
-
-def save_json(trips):
-    OUTPUT_JSON.write_text(json.dumps(trips, indent=2, ensure_ascii=False))
-    print(f"  JSON saved → {OUTPUT_JSON} ({len(trips)} trips)")
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -390,7 +382,7 @@ def load_config():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Export TripIt trips to JSON")
+    parser = argparse.ArgumentParser(description="Export TripIt trips to SQLite")
     parser.add_argument("--email", help="TripIt login email")
     parser.add_argument("--password", help="TripIt login password")
     parser.add_argument(
@@ -412,6 +404,9 @@ def main():
     password = args.password or config.get("password")
     if not email or not password:
         parser.error("email and password are required (via --email/--password flags or config.toml)")
+
+    conn = get_connection()
+    init_db(conn)
 
     with sync_playwright() as playwright:
         browser, context = ensure_authenticated(playwright, email, password)
@@ -437,7 +432,7 @@ def main():
             print(f"  (Limited to {args.limit})")
 
         # Fetch full details for each trip
-        trips = []
+        exported = 0
         errors = []
         for i, summary in enumerate(trip_summaries, 1):
             name = summary["display_name"]
@@ -446,7 +441,8 @@ def main():
             try:
                 detail = get_trip_detail(page, uuid)
                 trip = extract_trip(detail)
-                trips.append(trip)
+                upsert_trip(conn, trip)
+                exported += 1
                 print(" ok")
             except Exception as e:
                 print(f" ERROR: {e}")
@@ -454,13 +450,13 @@ def main():
 
         browser.close()
 
-    print(f"\nDone. {len(trips)} trips exported, {len(errors)} errors.")
+    conn.commit()
+    conn.close()
+
+    print(f"\nDone. {exported} trips saved to {get_connection().execute('SELECT count(*) FROM trips').fetchone()[0]} total in DB, {len(errors)} errors.")
     if errors:
         for e in errors:
             print(f"  ✗ {e['name']}: {e['error']}")
-
-    print("\nSaving output...")
-    save_json(trips)
 
 
 if __name__ == "__main__":

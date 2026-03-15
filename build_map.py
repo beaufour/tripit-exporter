@@ -1,92 +1,54 @@
 #!/usr/bin/env python3
-"""Build a static HTML map visualization from trips.json."""
+"""Build a static HTML map visualization from the trips database."""
 
 import json
-import time
-import os
-from geopy.geocoders import Nominatim
 
-TRIPS_FILE = "trips.json"
-GEOCACHE_FILE = "geocache.json"
+from db import get_connection, init_db
+
 OUTPUT_FILE = "trips_map.html"
 
 
-def load_geocache():
-    if os.path.exists(GEOCACHE_FILE):
-        with open(GEOCACHE_FILE) as f:
-            return json.load(f)
-    return {}
+def load_trip_data(conn):
+    """Load trip data with flight routes from the database."""
+    trips = conn.execute("""
+        SELECT uuid, name, primary_location, start_date, end_date, lat, lng
+        FROM trips
+        WHERE lat IS NOT NULL AND lng IS NOT NULL
+          AND start_date IS NOT NULL
+        ORDER BY start_date
+    """).fetchall()
 
-
-def save_geocache(cache):
-    with open(GEOCACHE_FILE, "w") as f:
-        json.dump(cache, f, indent=2)
-
-
-def geocode_locations(locations):
-    cache = load_geocache()
-    geolocator = Nominatim(user_agent="tripit-map-builder")
-    for loc in sorted(locations):
-        if loc in cache:
-            continue
-        print(f"  Geocoding: {loc}")
-        try:
-            result = geolocator.geocode(loc, timeout=10)
-            if result:
-                cache[loc] = {"lat": result.latitude, "lng": result.longitude}
-            else:
-                print(f"    WARNING: Could not geocode '{loc}'")
-                cache[loc] = None
-            time.sleep(1.1)  # Nominatim rate limit
-        except Exception as e:
-            print(f"    ERROR geocoding '{loc}': {e}")
-            cache[loc] = None
-    save_geocache(cache)
-    return cache
-
-
-def build_trip_data(trips, geocache):
-    """Build the JS data structure for the map."""
     entries = []
-    for trip in trips:
-        loc = trip.get("primary_location", "")
-        coords = geocache.get(loc)
-        if not coords:
-            continue
-        year = trip["start_date"][:4] if trip.get("start_date") else None
-        if not year:
-            continue
+    for t in trips:
+        # Get unique flight routes for this trip
+        flights = conn.execute("""
+            SELECT DISTINCT origin, origin_name, destination, destination_name,
+                   airline, flight_number
+            FROM flights
+            WHERE trip_uuid=?
+        """, (t["uuid"],)).fetchall()
 
-        # Collect flight routes
-        routes = []
-        if trip.get("flights"):
-            seen = set()
-            for f in trip["flights"]:
-                key = (f.get("origin"), f.get("destination"))
-                if key not in seen:
-                    seen.add(key)
-                    routes.append(
-                        {
-                            "from": f.get("origin_name", f.get("origin", "")),
-                            "to": f.get("destination_name", f.get("destination", "")),
-                            "airline": f.get("airline", ""),
-                            "flight": f.get("flight_number", ""),
-                        }
-                    )
-
-        entries.append(
+        routes = [
             {
-                "name": trip["name"],
-                "location": loc,
-                "lat": coords["lat"],
-                "lng": coords["lng"],
-                "year": int(year),
-                "start": trip.get("start_date", ""),
-                "end": trip.get("end_date", ""),
-                "flights": len(trip.get("flights", [])),
-                "routes": routes,
+                "from": f["origin_name"] or f["origin"] or "",
+                "to": f["destination_name"] or f["destination"] or "",
+                "airline": f["airline"] or "",
+                "flight": f["flight_number"] or "",
             }
-        )
+            for f in flights
+        ]
+
+        entries.append({
+            "name": t["name"],
+            "location": t["primary_location"],
+            "lat": t["lat"],
+            "lng": t["lng"],
+            "year": int(t["start_date"][:4]),
+            "start": t["start_date"],
+            "end": t["end_date"] or "",
+            "routes": routes,
+        })
+
     return entries
 
 
@@ -263,7 +225,6 @@ def generate_html(trip_data):
     margin: 2px 0;
   }}
 
-  /* Make Leaflet popups nicer */
   .leaflet-popup-content-wrapper {{
     border-radius: 12px !important;
     box-shadow: 0 10px 40px rgba(0,0,0,0.2) !important;
@@ -273,7 +234,6 @@ def generate_html(trip_data):
     margin: 14px 16px !important;
   }}
 
-  /* Cluster styles */
   .location-cluster {{
     border-radius: 50%;
     display: flex;
@@ -347,11 +307,9 @@ function initMap() {{
 }}
 
 function renderMarkers() {{
-  // Clear existing
   markers.forEach(m => map.removeLayer(m));
   markers = [];
 
-  // Group trips by location
   const byLocation = {{}};
   TRIPS.forEach(t => {{
     if (!activeYears.has(t.year)) return;
@@ -365,17 +323,14 @@ function renderMarkers() {{
     const lng = trips[0].lng;
     const count = trips.length;
 
-    // Determine dominant year (most trips) for color
     const yearCounts = {{}};
     trips.forEach(t => {{ yearCounts[t.year] = (yearCounts[t.year] || 0) + 1; }});
 
-    // Create multi-ring marker for multiple years, single dot for one
     let marker;
     if (count === 1) {{
       const t = trips[0];
-      const size = 14;
       marker = L.circleMarker([lat, lng], {{
-        radius: size / 2,
+        radius: 7,
         fillColor: yearColorSolid(t.year),
         fillOpacity: 0.9,
         color: '#fff',
@@ -383,7 +338,6 @@ function renderMarkers() {{
         opacity: 0.7,
       }});
     }} else {{
-      // Size based on trip count
       const size = Math.min(18 + count * 3, 40);
       const uniqueYears = [...new Set(trips.map(t => t.year))].sort();
 
@@ -397,12 +351,10 @@ function renderMarkers() {{
           opacity: 0.7,
         }});
       }} else {{
-        // Gradient-like effect: use the most recent year's color with a glow
         const sorted = uniqueYears.sort((a, b) => b - a);
-        const mainColor = yearColorSolid(sorted[0]);
         marker = L.circleMarker([lat, lng], {{
           radius: size / 2,
-          fillColor: mainColor,
+          fillColor: yearColorSolid(sorted[0]),
           fillOpacity: 0.85,
           color: yearColorSolid(sorted[sorted.length - 1]),
           weight: 3,
@@ -410,7 +362,6 @@ function renderMarkers() {{
         }});
       }}
 
-      // Add count label
       const icon = L.divIcon({{
         className: 'location-cluster',
         html: `<div style="
@@ -424,12 +375,10 @@ function renderMarkers() {{
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
       }});
-      // Add a transparent div icon on top for the label
       const label = L.marker([lat, lng], {{ icon, interactive: false }}).addTo(map);
       markers.push(label);
     }}
 
-    // Build popup
     const popupHtml = trips.map(t => {{
       let html = `<div class="trip-popup">
         <h3>${{t.name}}</h3>
@@ -474,7 +423,6 @@ function toggleYear(year) {{
 }}
 
 function toggleAll() {{
-  const allBtn = document.querySelector('.meta-btn');
   const years = Object.keys(YEAR_HUES).map(Number);
   if (activeYears.size === years.length) {{
     activeYears.clear();
@@ -539,33 +487,25 @@ initMap();
 
 
 def main():
-    print("Loading trips...")
-    with open(TRIPS_FILE) as f:
-        trips = json.load(f)
+    conn = get_connection()
+    init_db(conn)
 
-    locations = set(t["primary_location"] for t in trips if t.get("primary_location"))
-    print(f"Found {len(trips)} trips across {len(locations)} unique locations")
+    print("Loading trips from database...")
+    trip_data = load_trip_data(conn)
+    conn.close()
 
-    print("Geocoding locations...")
-    geocache = geocode_locations(locations)
+    if not trip_data:
+        print("No geocoded trips found. Run the exporter and geocoder first.")
+        return
 
-    failed = [loc for loc, coords in geocache.items() if coords is None and loc in locations]
-    if failed:
-        print(f"\nWARNING: Could not geocode {len(failed)} locations:")
-        for loc in failed:
-            print(f"  - {loc}")
-
-    print("Building trip data...")
-    trip_data = build_trip_data(trips, geocache)
-
+    print(f"Found {len(trip_data)} trips across {len(set(t['location'] for t in trip_data))} locations")
     print("Generating HTML...")
     html = generate_html(trip_data)
 
     with open(OUTPUT_FILE, "w") as f:
         f.write(html)
 
-    print(f"\nDone! Open {OUTPUT_FILE} in your browser.")
-    print(f"  {len(trip_data)} trips mapped across {len(set(t['location'] for t in trip_data))} locations")
+    print(f"Done! Open {OUTPUT_FILE} in your browser.")
 
 
 if __name__ == "__main__":
