@@ -3,3 +3,5 @@ tripit_session.json
 trips.json
 trips.csv
 tripit_errors.json
+geocache.json
+trips_map.html
