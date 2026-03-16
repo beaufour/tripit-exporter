@@ -6,3 +6,5 @@ tripit_errors.json
 geocache.json
 trips.db
 trips_map.html
+__pycache__/
+missing.txt
