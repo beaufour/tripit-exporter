@@ -1,6 +1,7 @@
 """SQLite database schema and helpers for trip data."""
 
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 DB_FILE = Path("trips.db")
@@ -108,6 +109,16 @@ def init_db(conn):
             phone TEXT,
             url TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS visited_locations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trip_uuid TEXT NOT NULL REFERENCES trips(uuid) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            source TEXT NOT NULL,
+            geocode_query TEXT NOT NULL,
+            lat REAL,
+            lng REAL
+        );
     """)
 
 
@@ -198,3 +209,115 @@ def upsert_trip(conn, trip):
         """, (uuid, act.get("name"), act.get("location"),
               act.get("start"), act.get("end"),
               act.get("address"), act.get("phone"), act.get("url")))
+
+
+def extract_visited_locations(conn):
+    """Extract visited locations from flights, lodging, activities, etc."""
+    # Cache existing geocoded coordinates so we don't lose them on re-extraction
+    existing = {}
+    for row in conn.execute(
+        "SELECT geocode_query, lat, lng FROM visited_locations WHERE lat IS NOT NULL"
+    ).fetchall():
+        existing[row["geocode_query"]] = (row["lat"], row["lng"])
+
+    conn.execute("DELETE FROM visited_locations")
+
+    trip_uuids = [r["uuid"] for r in conn.execute("SELECT uuid FROM trips").fetchall()]
+
+    for uuid in trip_uuids:
+        locations = []
+
+        # Flights: get non-connection airports
+        flights = conn.execute("""
+            SELECT origin, origin_name, destination, destination_name, departure
+            FROM flights WHERE trip_uuid = ?
+            ORDER BY departure
+        """, (uuid,)).fetchall()
+
+        # Identify connection airports: if flight[i].destination == flight[i+1].origin
+        # and they depart within 1 day, that airport is just a layover
+        connections = set()
+        for i in range(len(flights) - 1):
+            if (flights[i]["destination"]
+                    and flights[i]["destination"] == flights[i + 1]["origin"]):
+                # Check time gap — only a connection if departures are <=1 day apart
+                dep_a = flights[i]["departure"]
+                dep_b = flights[i + 1]["departure"]
+                if dep_a and dep_b:
+                    try:
+                        # Parse "2012-07-18 12:25:00 (Europe/Copenhagen)" → date part
+                        da = datetime.strptime(dep_a[:10], "%Y-%m-%d")
+                        db = datetime.strptime(dep_b[:10], "%Y-%m-%d")
+                        if (db - da).days <= 1:
+                            connections.add(flights[i]["destination"])
+                    except ValueError:
+                        # Can't parse dates, assume connection to be safe
+                        connections.add(flights[i]["destination"])
+
+        seen_airports = set()
+        for f in flights:
+            for code, name in [
+                (f["origin"], f["origin_name"]),
+                (f["destination"], f["destination_name"]),
+            ]:
+                if code and code not in connections and code not in seen_airports:
+                    seen_airports.add(code)
+                    display = name or code
+                    locations.append((display, "flight", display))
+
+        # Lodging
+        for lodge in conn.execute(
+            "SELECT name, address FROM lodging WHERE trip_uuid=?", (uuid,)
+        ).fetchall():
+            query = lodge["address"] or lodge["name"]
+            if query and query.lower() not in ("lodging", "hotel"):
+                locations.append((lodge["name"] or query, "lodging", query))
+
+        # Activities
+        for act in conn.execute(
+            "SELECT name, location, address FROM activities WHERE trip_uuid=?", (uuid,)
+        ).fetchall():
+            query = act["address"] or act["location"]
+            if query:
+                locations.append((act["name"] or query, "activity", query))
+
+        # Car rentals
+        for car in conn.execute(
+            "SELECT company, pick_up_location, drop_off_location FROM car_rentals WHERE trip_uuid=?",
+            (uuid,),
+        ).fetchall():
+            if car["pick_up_location"]:
+                locations.append((
+                    car["company"] or car["pick_up_location"],
+                    "car_rental",
+                    car["pick_up_location"],
+                ))
+            if (car["drop_off_location"]
+                    and car["drop_off_location"] != car["pick_up_location"]):
+                locations.append((
+                    car["company"] or car["drop_off_location"],
+                    "car_rental",
+                    car["drop_off_location"],
+                ))
+
+        # Transport
+        for t in conn.execute(
+            "SELECT name, start_location, start_address, end_location, end_address FROM transport WHERE trip_uuid=?",
+            (uuid,),
+        ).fetchall():
+            start_query = t["start_address"] or t["start_location"]
+            if start_query:
+                locations.append((t["name"] or start_query, "transport", start_query))
+            end_query = t["end_address"] or t["end_location"]
+            if end_query and end_query != start_query:
+                locations.append((t["name"] or end_query, "transport", end_query))
+
+        for name, source, query in locations:
+            cached = existing.get(query)
+            lat, lng = cached if cached else (None, None)
+            conn.execute("""
+                INSERT INTO visited_locations (trip_uuid, name, source, geocode_query, lat, lng)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (uuid, name, source, query, lat, lng))
+
+    conn.commit()

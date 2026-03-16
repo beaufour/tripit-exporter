@@ -5,30 +5,12 @@ import time
 
 from geopy.geocoders import Nominatim
 
-from db import get_connection, init_db
+from db import extract_visited_locations, get_connection, init_db
 
 
-def main():
-    conn = get_connection()
-    init_db(conn)
-
-    # Find distinct locations that need geocoding
-    rows = conn.execute("""
-        SELECT DISTINCT primary_location
-        FROM trips
-        WHERE primary_location IS NOT NULL
-          AND (lat IS NULL OR lng IS NULL)
-    """).fetchall()
-
-    if not rows:
-        print("All locations already geocoded.")
-        return
-
-    locations = [r["primary_location"] for r in rows]
-    print(f"Found {len(locations)} locations to geocode.")
-
-    geolocator = Nominatim(user_agent="tripit-map-builder")
-    geocoded = 0
+def geocode_locations(geolocator, locations):
+    """Geocode a list of location strings. Returns dict of location -> (lat, lng)."""
+    results = {}
     failed = []
 
     for loc in sorted(locations):
@@ -36,12 +18,7 @@ def main():
         try:
             result = geolocator.geocode(loc, timeout=10)
             if result:
-                conn.execute(
-                    "UPDATE trips SET lat=?, lng=? WHERE primary_location=?",
-                    (result.latitude, result.longitude, loc),
-                )
-                conn.commit()
-                geocoded += 1
+                results[loc] = (result.latitude, result.longitude)
                 print(f" ({result.latitude:.4f}, {result.longitude:.4f})")
             else:
                 print(" NOT FOUND")
@@ -51,10 +28,67 @@ def main():
             print(f" ERROR: {e}")
             failed.append(loc)
 
-    print(f"\nDone. Geocoded {geocoded} locations.")
-    if failed:
-        print(f"Failed ({len(failed)}):")
-        for loc in failed:
+    return results, failed
+
+
+def main():
+    conn = get_connection()
+    init_db(conn)
+
+    # Extract visited locations from sub-objects
+    print("Extracting visited locations from trips...")
+    extract_visited_locations(conn)
+    count = conn.execute("SELECT COUNT(*) FROM visited_locations").fetchone()[0]
+    print(f"  Found {count} visited locations.")
+
+    geolocator = Nominatim(user_agent="tripit-map-builder")
+    all_failed = []
+
+    # Geocode trip primary locations
+    rows = conn.execute("""
+        SELECT DISTINCT primary_location
+        FROM trips
+        WHERE primary_location IS NOT NULL
+          AND (lat IS NULL OR lng IS NULL)
+    """).fetchall()
+
+    trip_locations = [r["primary_location"] for r in rows]
+    if trip_locations:
+        print(f"\nGeocoding {len(trip_locations)} trip primary locations...")
+        results, failed = geocode_locations(geolocator, trip_locations)
+        all_failed.extend(failed)
+        for loc, (lat, lng) in results.items():
+            conn.execute(
+                "UPDATE trips SET lat=?, lng=? WHERE primary_location=?",
+                (lat, lng, loc),
+            )
+        conn.commit()
+
+    # Geocode visited locations
+    rows = conn.execute("""
+        SELECT DISTINCT geocode_query
+        FROM visited_locations
+        WHERE lat IS NULL OR lng IS NULL
+    """).fetchall()
+
+    visited_queries = [r["geocode_query"] for r in rows]
+    if visited_queries:
+        print(f"\nGeocoding {len(visited_queries)} visited locations...")
+        results, failed = geocode_locations(geolocator, visited_queries)
+        all_failed.extend(failed)
+        for query, (lat, lng) in results.items():
+            conn.execute(
+                "UPDATE visited_locations SET lat=?, lng=? WHERE geocode_query=?",
+                (lat, lng, query),
+            )
+        conn.commit()
+
+    if not trip_locations and not visited_queries:
+        print("All locations already geocoded.")
+
+    if all_failed:
+        print(f"\nFailed ({len(all_failed)}):")
+        for loc in all_failed:
             print(f"  - {loc}")
 
     conn.close()

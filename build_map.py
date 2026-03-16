@@ -9,12 +9,15 @@ OUTPUT_FILE = "trips_map.html"
 
 
 def load_trip_data(conn):
-    """Load trip data with flight routes from the database."""
+    """Load trip data with flight routes from the database.
+
+    Each trip can appear at multiple locations: its primary_location plus
+    any visited locations extracted from flights, lodging, activities, etc.
+    """
     trips = conn.execute("""
         SELECT uuid, name, primary_location, start_date, end_date, lat, lng
         FROM trips
-        WHERE lat IS NOT NULL AND lng IS NOT NULL
-          AND start_date IS NOT NULL
+        WHERE start_date IS NOT NULL
         ORDER BY start_date
     """).fetchall()
 
@@ -38,16 +41,45 @@ def load_trip_data(conn):
             for f in flights
         ]
 
-        entries.append({
-            "name": t["name"],
-            "location": t["primary_location"],
-            "lat": t["lat"],
-            "lng": t["lng"],
-            "year": int(t["start_date"][:4]),
-            "start": t["start_date"],
-            "end": t["end_date"] or "",
-            "routes": routes,
-        })
+        # Collect all geocoded locations for this trip
+        visited = conn.execute("""
+            SELECT name, lat, lng FROM visited_locations
+            WHERE trip_uuid=? AND lat IS NOT NULL AND lng IS NOT NULL
+        """, (t["uuid"],)).fetchall()
+
+        # Use visited locations if available, otherwise fall back to primary
+        seen_coords = set()
+        if visited:
+            for v in visited:
+                coord_key = (round(v["lat"], 4), round(v["lng"], 4))
+                if coord_key in seen_coords:
+                    continue
+                seen_coords.add(coord_key)
+                entries.append({
+                    "name": t["name"],
+                    "location": v["name"],
+                    "lat": v["lat"],
+                    "lng": v["lng"],
+                    "year": int(t["start_date"][:4]),
+                    "start": t["start_date"],
+                    "end": t["end_date"] or "",
+                    "routes": routes,
+                })
+
+        # Always include primary_location if geocoded and not already covered
+        if t["lat"] is not None and t["lng"] is not None:
+            coord_key = (round(t["lat"], 4), round(t["lng"], 4))
+            if coord_key not in seen_coords:
+                entries.append({
+                    "name": t["name"],
+                    "location": t["primary_location"],
+                    "lat": t["lat"],
+                    "lng": t["lng"],
+                    "year": int(t["start_date"][:4]),
+                    "start": t["start_date"],
+                    "end": t["end_date"] or "",
+                    "routes": routes,
+                })
 
     return entries
 
