@@ -114,13 +114,13 @@ def generate_html(trip_data):
 
   header {{
     background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-    padding: 16px 24px;
+    padding: 12px 16px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     border-bottom: 1px solid #1e293b;
     flex-shrink: 0;
-    z-index: 1000;
+    z-index: 1001;
   }}
 
   header h1 {{
@@ -130,6 +130,12 @@ def generate_html(trip_data):
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     letter-spacing: -0.02em;
+  }}
+
+  .header-right {{
+    display: flex;
+    align-items: center;
+    gap: 16px;
   }}
 
   .stats {{
@@ -151,9 +157,32 @@ def generate_html(trip_data):
     font-size: 1.1rem;
   }}
 
+  .menu-toggle {{
+    display: none;
+    background: none;
+    border: 2px solid #475569;
+    border-radius: 8px;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 6px 8px;
+    font-size: 1.2rem;
+    line-height: 1;
+    transition: all 0.2s ease;
+  }}
+
+  .menu-toggle:hover {{
+    border-color: #818cf8;
+    color: #e2e8f0;
+  }}
+
+  .menu-toggle.active {{
+    border-color: #818cf8;
+    color: #818cf8;
+  }}
+
   .controls {{
     background: #1e293b;
-    padding: 12px 24px;
+    padding: 12px 16px;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -170,6 +199,64 @@ def generate_html(trip_data):
     letter-spacing: 0.05em;
     color: #64748b;
     margin-right: 4px;
+  }}
+
+  @media (max-width: 640px) {{
+    .stats {{
+      display: none;
+    }}
+
+    .menu-toggle {{
+      display: block;
+    }}
+
+    .controls {{
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      padding: 12px 16px;
+      border-bottom: 1px solid #334155;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }}
+
+    .controls.open {{
+      display: flex;
+    }}
+
+    .controls .mobile-stats {{
+      display: flex;
+      width: 100%;
+      gap: 16px;
+      font-size: 0.8rem;
+      color: #94a3b8;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #334155;
+      margin-bottom: 4px;
+    }}
+
+    .controls .mobile-stats span {{
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }}
+
+    .controls .mobile-stats .num {{
+      color: #e2e8f0;
+      font-weight: 600;
+      font-size: 1rem;
+    }}
+
+    header {{
+      position: relative;
+    }}
+  }}
+
+  @media (min-width: 641px) {{
+    .controls .mobile-stats {{
+      display: none;
+    }}
   }}
 
   .year-btn {{
@@ -284,14 +371,22 @@ def generate_html(trip_data):
 
 <header>
   <h1>Travel Map</h1>
-  <div class="stats">
-    <span><span class="num" id="trip-count">0</span> trips</span>
-    <span><span class="num" id="location-count">0</span> places</span>
-    <span><span class="num" id="country-count">0</span> countries</span>
+  <div class="header-right">
+    <div class="stats">
+      <span><span class="num" id="trip-count">0</span> trips</span>
+      <span><span class="num" id="location-count">0</span> places</span>
+      <span><span class="num" id="country-count">0</span> countries</span>
+    </div>
+    <button class="menu-toggle" onclick="toggleMenu()" aria-label="Toggle filters">&#9776;</button>
   </div>
 </header>
 
-<div class="controls">
+<div class="controls" id="controls">
+  <div class="mobile-stats">
+    <span><span class="num" id="trip-count-m">0</span> trips</span>
+    <span><span class="num" id="location-count-m">0</span> places</span>
+    <span><span class="num" id="country-count-m">0</span> countries</span>
+  </div>
   <label>Filter</label>
   <button class="meta-btn active" onclick="toggleAll()">All</button>
   <button class="meta-btn" onclick="selectNone()">None</button>
@@ -497,18 +592,36 @@ function updateButtons() {{
   noneBtn.classList.toggle('active', activeYears.size === 0);
 }}
 
+function toggleMenu() {{
+  const controls = document.getElementById('controls');
+  const btn = document.querySelector('.menu-toggle');
+  controls.classList.toggle('open');
+  btn.classList.toggle('active');
+}}
+
 function updateStats() {{
   const visible = TRIPS.filter(t => activeYears.has(t.year));
-  document.getElementById('trip-count').textContent = visible.length;
+  const tripCount = visible.length;
 
   const places = new Set(visible.map(t => t.location));
-  document.getElementById('location-count').textContent = places.size;
+  const placeCount = places.size;
 
   const countries = new Set(visible.map(t => {{
     const parts = t.location.split(', ');
     return parts[parts.length - 1];
   }}));
-  document.getElementById('country-count').textContent = countries.size;
+  const countryCount = countries.size;
+
+  document.getElementById('trip-count').textContent = tripCount;
+  document.getElementById('location-count').textContent = placeCount;
+  document.getElementById('country-count').textContent = countryCount;
+
+  const tripM = document.getElementById('trip-count-m');
+  if (tripM) {{
+    tripM.textContent = tripCount;
+    document.getElementById('location-count-m').textContent = placeCount;
+    document.getElementById('country-count-m').textContent = countryCount;
+  }}
 }}
 
 initMap();
