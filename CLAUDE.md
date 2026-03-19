@@ -14,6 +14,7 @@ All data files live in `data/` (gitignored): `trips.db`, `config.toml`, `tripit_
 - `import_manual_trips.py` — Imports manually curated trips from `data/manual_trips.json` into the DB
 - `geocoder.py` — Geocodes locations in the DB using Nominatim
 - `build_map.py` — Generates `data/trips_map.html` interactive map from DB
+- `upload_map.sh` — Uploads `data/trips_map.html` to S3 (`s3://www.beaufour.dk/travelmap/index.html`) with public-read ACL
 
 ## Trip sources
 
