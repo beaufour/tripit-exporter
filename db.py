@@ -220,7 +220,8 @@ def extract_visited_locations(conn):
     ).fetchall():
         existing[row["geocode_query"]] = (row["lat"], row["lng"])
 
-    conn.execute("DELETE FROM visited_locations")
+    # Only delete non-manual locations; manual ones are managed by import_manual_trips
+    conn.execute("DELETE FROM visited_locations WHERE source != 'manual'")
 
     trip_uuids = [r["uuid"] for r in conn.execute("SELECT uuid FROM trips").fetchall()]
 
