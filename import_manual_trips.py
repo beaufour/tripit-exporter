@@ -7,7 +7,7 @@ from pathlib import Path
 
 from db import get_connection, init_db
 
-MANUAL_TRIPS_FILE = Path("manual_trips.json")
+MANUAL_TRIPS_FILE = Path("data/manual_trips.json")
 
 
 def generate_uuid(trip_name):

@@ -5,7 +5,7 @@ import json
 
 from db import get_connection, init_db
 
-OUTPUT_FILE = "trips_map.html"
+OUTPUT_FILE = "data/trips_map.html"
 
 
 def load_trip_data(conn):

@@ -32,8 +32,8 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 from db import get_connection, init_db, upsert_trip
 
 
-CONFIG_FILE = Path("config.toml")
-SESSION_FILE = Path("tripit_session.json")
+CONFIG_FILE = Path("data/config.toml")
+SESSION_FILE = Path("data/tripit_session.json")
 
 TRIPIT_BASE = "https://www.tripit.com"
 API_BASE = f"{TRIPIT_BASE}/api/v2"

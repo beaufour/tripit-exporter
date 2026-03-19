@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-DB_FILE = Path("trips.db")
+DB_FILE = Path("data/trips.db")
 
 
 def get_connection():
