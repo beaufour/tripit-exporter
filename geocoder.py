@@ -41,6 +41,27 @@ def main():
     count = conn.execute("SELECT COUNT(*) FROM visited_locations").fetchone()[0]
     print(f"  Found {count} visited locations.")
 
+    # Clean up messy geocode queries before geocoding
+    from cleanup_geocodes import clean_query
+    rows = conn.execute(
+        "SELECT id, geocode_query FROM visited_locations WHERE lat IS NULL OR lng IS NULL"
+    ).fetchall()
+    cleaned_count = 0
+    for row in rows:
+        cleaned = clean_query(row["geocode_query"])
+        if cleaned is None:
+            conn.execute("DELETE FROM visited_locations WHERE id=?", (row["id"],))
+            cleaned_count += 1
+        elif cleaned != row["geocode_query"]:
+            conn.execute(
+                "UPDATE visited_locations SET geocode_query=?, lat=NULL, lng=NULL WHERE id=?",
+                (cleaned, row["id"]),
+            )
+            cleaned_count += 1
+    if cleaned_count:
+        conn.commit()
+        print(f"  Cleaned up {cleaned_count} geocode queries.")
+
     geolocator = Nominatim(user_agent="tripit-map-builder")
     all_failed = []
 
